@@ -162,6 +162,11 @@ class DwSnippets {
   }
 
   function display_snippet($atts) {
+      foreach($atts as $index => $att) {
+        $matches = array();
+        preg_match('%(.*)=[\'"](.*)[\'"]%', $att, $matches);
+        $atts[$matches[1]] = $matches[2];
+      }
     if(isset($atts['tag'])) {
       $snippet_tag = $atts['tag'];
       $inline =  $atts['inline'];
@@ -175,10 +180,10 @@ class DwSnippets {
           )
         )
       );
-    } else {
+    } elseif(isset($atts['snippet_id'])) {
       $args = array(
         'post_type' => 'snippet',
-        'p' => $atts['snippet_id'],
+        'p' => (int) $atts['snippet_id'],
       );
     }
     $query = new WP_Query($args);
