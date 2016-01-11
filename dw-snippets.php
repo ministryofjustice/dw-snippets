@@ -20,9 +20,12 @@ class DwSnippets {
   function __construct() {
     add_action('init',array($this,'create_snippet_categories'),10);
     add_action('init',array($this,'create_post_type'),11);
+    add_action('init',array($this,'create_snippet_taxonomy'),12);
     add_action('save_post', array($this,'snippet_shortcode_metabox_save'),10);
+    add_action('save_post', array($this,'clean_tracking_tags'),1);
     add_shortcode($this->shortcode_name,array($this,'display_snippet'));
     add_action( 'register_shortcode_ui', array($this,'snippets_shortcode_ui') );
+    add_action('admin_enqueue_scripts', array($this,'admin_styles') );
   }
 
   function create_post_type() {
@@ -56,6 +59,27 @@ class DwSnippets {
     );
   }
 
+  function create_snippet_categories() {
+    register_taxonomy( 'snippet_categories', $this->post_type_name, array(
+        'labels' => array(
+            'name' => "Snippet Categories"
+          ),
+        'hierarchical' => true,
+        'show_in_quick_edit' => false
+      ) );
+  }
+
+  function create_snippet_taxonomy() {
+    $supported_post_types = array('post','page','news','webchat','event');
+    $args = array(
+      'show_ui' => true,
+      'labels' => array(
+        'name' => "Snippets Used"
+      )
+    );
+    register_taxonomy('dw_'.$this->shortcode_name,$supported_post_types,$args);
+  }
+
   function snippet_metaboxes() {
     // Remove Relevanssi metabox for Snippet CPT
     remove_meta_box('relevanssi_hidebox', $this->post_type_name, 'advanced' );
@@ -67,14 +91,6 @@ class DwSnippets {
     add_meta_box ('snippet_categoriesdiv',"Snippet Categories",'post_categories_meta_box',$this->post_type_name,'side','default',array('taxonomy' => 'snippet_categories'));
   }
 
-  function create_snippet_categories() {
-    register_taxonomy( 'snippet_categories', $this->post_type_name, array(
-        'labels' => array(
-            'name' => "Snippet Categories"
-          ),
-        'hierarchical' => true
-      ) );
-  }
 
   function snippet_shortcode_metabox_callback($post) {
     wp_nonce_field( 'snippet_shortcode_metabox', 'snippet_shortcode_metabox_nonce' );
@@ -94,79 +110,102 @@ class DwSnippets {
   }
 
   function snippet_shortcode_metabox_save($post_id) {
-    if ( ! isset( $_POST['snippet_shortcode_metabox_nonce'] ) ) {
-        return;
-    }
-    if ( ! wp_verify_nonce( $_POST['snippet_shortcode_metabox_nonce'], 'snippet_shortcode_metabox' ) ) {
-        return;
-    }
-    if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
-        return;
-    }
-    if ( isset( $_POST['post_type'] ) && 'snippet' == $_POST['post_type'] ) {
-        if ( ! current_user_can( 'edit_page', $post_id ) ) {
-            return;
-        }
-    } else {
-        if ( ! current_user_can( 'edit_post', $post_id ) ) {
-            return;
-        }
-    }
-    $field_array=array('dw_snippet_shortcode');
+    if(get_post_type( $post_id )=="snippet") {
+      $shortcode_tag = $_POST['dw_snippet_shortcode'];
+      $old_shortcode_tag = get_post_meta($post_id,'_dw_snippet_shortcode',true);
+      $snippet_track_taxonomy = 'dw_'.$this->shortcode_name;
 
-    // Validation
-    $data_ok = true;
-    $mojintranet_errors = get_option( 'mojintranet_errors');
-    if(in_array(get_post_status( $post_id ),array('publish','future'))) { // Only validate on publish
-      // If dw_snippet_shortcode is not unique
-      $args = array(
-          'post_type' => $this->post_type_name,
-          'post__not_in' => array($post_id), // exclude current post
-          'meta_query' => array(
-              array(
-                  'key' => '_dw_snippet_shortcode',
-                  'value' => $_POST['dw_snippet_shortcode']
-                )
-            )
-        );
-      $validation_query = new WP_Query($args);
-      $validation_results = $validation_query->posts;
-      if(!empty($validation_results)) {
-        $mojintranet_errors[]= "Shortcode text is not unique. Please amend and save.";
-        $data_ok = false;
+      if ( ! isset( $_POST['snippet_shortcode_metabox_nonce'] ) ) {
+          return;
       }
-    } // end if
-
-    foreach ($field_array as $field) {
-      if (isset($_POST[$field])) {
-          $data = sanitize_text_field( $_POST[$field] );
-          update_post_meta( $post_id, "_" . $field, $data );
+      if ( ! wp_verify_nonce( $_POST['snippet_shortcode_metabox_nonce'], 'snippet_shortcode_metabox' ) ) {
+          return;
+      }
+      if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+          return;
+      }
+      if ( isset( $_POST['post_type'] ) && 'snippet' == $_POST['post_type'] ) {
+          if ( ! current_user_can( 'edit_page', $post_id ) ) {
+              return;
+          }
       } else {
-          delete_post_meta( $post_id, "_" . $field);
+          if ( ! current_user_can( 'edit_post', $post_id ) ) {
+              return;
+          }
       }
-    } // end foreach
+      $field_array=array('dw_snippet_shortcode');
 
-    if(!$data_ok) {
-      // save error messages
-      update_option('mojintranet_errors',$mojintranet_errors);
+      // Validation
+      $data_ok = true;
+      $mojintranet_errors = get_option( 'mojintranet_errors');
+      if(in_array(get_post_status( $post_id ),array('publish','future'))) { // Only validate on publish
+        // If dw_snippet_shortcode is not unique
+        $args = array(
+            'post_type' => $this->post_type_name,
+            'post__not_in' => array($post_id), // exclude current post
+            'meta_query' => array(
+                array(
+                    'key' => '_dw_snippet_shortcode',
+                    'value' => $shortcode_tag
+                  )
+              )
+          );
+        $validation_query = new WP_Query($args);
+        $validation_results = $validation_query->posts;
+        if(!empty($validation_results)) {
+          $mojintranet_errors[]= "Shortcode text is not unique. Please amend and save.";
+          $data_ok = false;
+        } else {
+          Debug::full([$shortcode_tag,$old_shortcode_tag]);
+          if(!$old_shortcode_tag ) {
+            // echo "new tag";
+            wp_insert_term($shortcode_tag,$snippet_track_taxonomy);
+            // die;
+          } else {
+            // echo "rename tag"; die;
+            $current_term = get_term_by( 'name', $old_shortcode_tag, $snippet_track_taxonomy);
+            wp_update_term( $current_term->term_id, $snippet_track_taxonomy, $args = array('name' => $shortcode_tag) );
+          }
+        }
+      } // end if
 
-      // unhook this function to prevent indefinite loop
-      remove_action('save_post', 'event_details_save',5);
+      foreach ($field_array as $field) {
+        if (isset($_POST[$field])) {
+            $data = sanitize_text_field( $_POST[$field] );
+            update_post_meta( $post_id, "_" . $field, $data );
+        } else {
+            delete_post_meta( $post_id, "_" . $field);
+        }
+      } // end foreach
 
-      // update the post to change post status
-      wp_update_post(array('ID' => $post_id, 'post_status' => 'draft'));
+      if(!$data_ok) {
+        // save error messages
+        update_option('mojintranet_errors',$mojintranet_errors);
 
-      // re-hook this function again
-      add_action('save_post', 'event_details_save',5);
-    } // end if
+        // unhook this function to prevent indefinite loop
+        remove_action('save_post', 'event_details_save',5);
+
+        // update the post to change post status
+        wp_update_post(array('ID' => $post_id, 'post_status' => 'draft'));
+
+        // re-hook this function again
+        add_action('save_post', 'event_details_save',5);
+      } // end if
+    }
   }
 
   function display_snippet($atts) {
-      foreach($atts as $index => $att) {
-        $matches = array();
-        preg_match('%(.*)=[\'"](.*)[\'"]%', $att, $matches);
-        $atts[$matches[1]] = $matches[2];
-      }
+    global $post;
+    $post_id = $post->ID;
+    // Extract arguments with single or double quotes (WordPress fail)
+    foreach($atts as $index => $att) {
+      $matches = array();
+      preg_match('%(.*)=[\'"](.*)[\'"]%', $att, $matches);
+      $atts[$matches[1]] = $matches[2];
+    }
+
+    // Ensure it works with both 'tag' and 'snippet_id' arguments
+    // Tag has preference
     if(isset($atts['tag'])) {
       $snippet_tag = $atts['tag'];
       $inline =  $atts['inline'];
@@ -187,15 +226,31 @@ class DwSnippets {
       );
     }
     $query = new WP_Query($args);
+
+
     if($query->posts) {
-      $query->the_post();
+      $query->the_post(); 
       $content = get_the_content();
       $content=do_shortcode($content);
       if(!$inline) {
         $content = wpautop($content);
       }
+
+      // Update snippet taxonomy
+      if(!isset($snippet_tag)) {
+        $snippet_tag = get_post_meta( get_the_ID(), '_dw_snippet_shortcode', true );
+      }
+      if($post_id) {
+        $terms_updated = wp_set_object_terms($post_id,$snippet_tag,'dw_'.$this->shortcode_name,true);
+        $updated_term = get_term_by( 'term_taxonomy_id', $terms_updated[0], 'dw_'.$this->shortcode_name);
+        wp_update_term($updated_term->term_id,'dw_'.$this->shortcode_name,array(
+          'description' => get_the_title( get_the_ID() )
+        ));
+      }
+
       return $content;
     }
+
     return false;
   }
 
@@ -213,6 +268,17 @@ class DwSnippets {
         )
       )
     ));
+  }
+
+  function clean_tracking_tags($post_id) {
+    // Clean all shortcode tracking tags
+    wp_set_object_terms( $post_id, null, 'dw_'.$this->shortcode_name );
+
+  }
+
+  function admin_styles() {
+    $plugin_url = plugins_url( '', __FILE__ );
+    wp_enqueue_style('admin-styles', $plugin_url .'/css/snippets-taxonomy.css');
   }
 }
 

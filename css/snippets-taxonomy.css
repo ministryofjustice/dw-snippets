@@ -1,0 +1,8 @@
+.taxonomy-dw_snippet #col-left {
+  display: none;
+  visibility: none;
+}
+
+.taxonomy-dw_snippet #col-right {
+  width: 100%;
+}
