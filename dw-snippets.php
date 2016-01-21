@@ -248,6 +248,8 @@ class DwSnippets {
         ));
       }
 
+      wp_reset_query();
+
       return $content;
     }
 
